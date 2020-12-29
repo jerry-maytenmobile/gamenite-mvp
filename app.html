@@ -20,13 +20,13 @@
         <playercaption></playercaption>
       </div>
 
-      <gamearea>
+      <div id="gamearea">
         <!-- game board in the center, player hand towards the bottom -->
         <gameboard></gameboard>
-        <playerhand></playerhand>
-      </gamearea>
+        <playerhand v-bind:gamestate="gamestate"></playerhand>
+      </div>
 
-      <controlbar>
+      <controlbar @playgame="changestate_playgame">
         <!-- very bottom contains controls for video/audio, settings,... -->
       </controlbar>
     </div>
@@ -48,14 +48,24 @@
             centerImgArray: [''],
             // for player hands
             playerHands: [['']],
+            // game state
+            gamestate: 'setup',
+            // for control bar
+            playButtonActive: true
           };
         },
 //        computed: {
 //
 //        },
-//        methods: {
-//
-//        },
+        methods: {
+          changestate_playgame(){
+            if(this.playButtonActive){
+              this.gamestate = 'playerchoosecard';
+              this.infobarmsg = "Active player chooses card and gives clue. Then other players choose a card.";
+              this.playButtonActive = false;
+            }
+          }
+        },
 //        created(){
 //
 //        },
@@ -67,10 +77,12 @@
         data(){
           return {
             styleobject: {
-              color: 'blue',
-              backgroundColor: 'grey',
+              color: 'black',
+              backgroundColor: 'lightgrey',
               width: '100%',
-              textAlign: 'center'
+              textAlign: 'center',
+              padding: '0.5px',
+              fontWeight: 'bold'
             }
           }
         }
@@ -88,7 +100,7 @@
         }
       });
       app.component('playercaption',{
-        props: [],
+        props: ['gamestate'],
         template: `<div :style="styleobject"><p>Player Caption here</p></div>`,
         data(){
           return {
@@ -99,21 +111,44 @@
           }
         }
       });
-      app.component('gamearea', {
-        props: [],
-        template: `<div><p>Game Area Here </p></div>`,
-      });
+//      app.component('gamearea', {
+//        props: [],
+//        template: `<span></span>`,
+//      });
       app.component('gameboard', {
         props: [],
         template: `<div><p>Game Board Here </p></div>`,
       });
       app.component('playerhand', {
-        props: [],
-        template: `<div><p>Player Hand Here </p></div>`,
+        props: ['gamestate'],
+        template: `<div v-if="gamestate==='playerchoosecard'"><img src="assets/dixet1.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet2.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet3.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet4.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet5.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet6.jpg" alt="img here" :style="playercardstyle" ></img></div><div v-else><p>Player Hand here - gamestate = {{gamestate}}</p></div>`,
+        data(){
+          return {
+            playercardstyle: {
+              width: '15vw',
+              height: '20vh',
+              padding: '0.5px'
+            }
+          }
+        }
       });
       app.component('controlbar', {
         props: [],
-        template: `<div><p>Control Bar Here </p></div>`,
+        emits: ['playgame'],
+        template: `<div><button :style="buttonstyle" @click="emitplaygame">Play Game</button></div>`,
+        data(){
+          return {
+            buttonstyle: {
+              width: '100%',
+              height: '5vh'
+            }
+          }
+        },
+        methods: {
+          emitplaygame() {
+            this.$emit('playgame');
+          }
+        }
       });
 
       let vm = app.mount('#app');
