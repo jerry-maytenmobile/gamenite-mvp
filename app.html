@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameNite.App</title>
+    <script src="https://unpkg.com/vue@next"></script>
+  </head>
+  <body>
+    <div id="app">
+      <infobar v-bind:infobarmsg="infobarmsg">
+        <!-- text info on current state of game - whose turn and what to do next -->
+      </infobar>
+
+      <div id="playertopbar">
+        <!-- video div element, and player caption (P.CAP.) element for each player
+             P.CAP. element: player name, score, high-level game info.
+             press-and-hold to see detailed player info               -->
+        <playervideo></playervideo>
+        <playercaption></playercaption>
+      </div>
+
+      <gamearea>
+        <!-- game board in the center, player hand towards the bottom -->
+        <gameboard></gameboard>
+        <playerhand></playerhand>
+      </gamearea>
+
+      <controlbar>
+        <!-- very bottom contains controls for video/audio, settings,... -->
+      </controlbar>
+    </div>
+
+    <script type="text/javascript">
+      let app = Vue.createApp({
+        data(){
+          return {
+            // for info bar
+            infobarmsg: 'Lets play Dixet!',
+            // for video
+            isMuted: false,
+            isVideo: true,
+            // for player caption
+            numPlayers: 1,
+            playerNames: ['Host'],
+            playerScores: [0],
+            // for game board
+            centerImgArray: [''],
+            // for player hands
+            playerHands: [['']],
+          };
+        },
+//        computed: {
+//
+//        },
+//        methods: {
+//
+//        },
+//        created(){
+//
+//        },
+      });
+
+      app.component('infobar', {
+        props: ['infobarmsg'],
+        template: `<div :style="styleobject"><p>{{infobarmsg}}</p></div>`,
+        data(){
+          return {
+            styleobject: {
+              color: 'blue',
+              backgroundColor: 'grey',
+              width: '100%',
+              textAlign: 'center'
+            }
+          }
+        }
+      });
+      app.component('playervideo', {
+        props: [],
+        template: `<div :style="styleobject"><p>Player Video here</p></div>`,
+        data(){
+          return {
+            styleobject: {
+              color: 'red',
+              width: '100%'
+            }
+          }
+        }
+      });
+      app.component('playercaption',{
+        props: [],
+        template: `<div :style="styleobject"><p>Player Caption here</p></div>`,
+        data(){
+          return {
+            styleobject: {
+              color: 'green',
+              width: '100%'
+            }
+          }
+        }
+      });
+      app.component('gamearea', {
+        props: [],
+        template: `<div><p>Game Area Here </p></div>`,
+      });
+      app.component('gameboard', {
+        props: [],
+        template: `<div><p>Game Board Here </p></div>`,
+      });
+      app.component('playerhand', {
+        props: [],
+        template: `<div><p>Player Hand Here </p></div>`,
+      });
+      app.component('controlbar', {
+        props: [],
+        template: `<div><p>Control Bar Here </p></div>`,
+      });
+
+      let vm = app.mount('#app');
+    </script>
+  </body>
+</html>
