@@ -23,7 +23,7 @@
       <div id="gamearea">
         <!-- game board in the center, player hand towards the bottom -->
         <gameboard></gameboard>
-        <playerhand v-bind:gamestate="gamestate"></playerhand>
+        <playerhand v-bind:gamestate="gamestate" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-bind:playercardselected="playercardselected"></playerhand>
       </div>
 
       <controlbar @playgame="changestate_playgame">
@@ -41,13 +41,16 @@
             isMuted: false,
             isVideo: true,
             // for player caption
-            numPlayers: 1,
-            playerNames: ['Host'],
-            playerScores: [0],
+            numPlayers: 1, // gets updated from server
+            playerNames: ['Host'], // gets updated from server
+            playerScores: [0], // gets updated from server
+            playernumber: 1, // which player are you
             // for game board
-            centerImgArray: [''],
-            // for player hands
-            playerHands: [['']],
+            centerImgArray: [], // gets updated from server
+            // for player hand
+            numPlayersSelected: 0, // how many players have selected their card
+            imgnumarray: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
+            playercardselected: null,  // which card was selected
             // game state
             gamestate: 'setup',
             // for control bar
@@ -64,7 +67,32 @@
               this.infobarmsg = "Active player chooses card and gives clue. Then other players choose a card.";
               this.playButtonActive = false;
             }
-          }
+          },
+          changestate_showcentercards(){
+            if(this.playButtonActive === false){
+              this.gamestate = 'showcentercards';
+              this.infobarmsg = "All players choose the center card you think is from the active player.";
+            }
+          },
+          changestate_revealandupdatescore(){
+            if(this.playButtonActive === false){
+              this.gamestate = 'revealandupdatescore';
+              this.infobarmsg = "Here is what everyone chose!";
+            }
+          },
+          changestate_gamedone(){
+            if(this.playButtonActive === false){
+              this.gamestate = 'gamedone';
+              this.infobarmsg = "We have a winner!";
+            }
+          },
+          changestate_resetturn(){
+            if(this.playButtonActive === false){
+              this.gamestate = 'resetturn';
+              this.infobarmsg = "Dealing new cards and resetting for next round";
+            }
+          },
+
         },
 //        created(){
 //
@@ -120,16 +148,59 @@
         template: `<div><p>Game Board Here </p></div>`,
       });
       app.component('playerhand', {
-        props: ['gamestate'],
-        template: `<div v-if="gamestate==='playerchoosecard'"><img src="assets/dixet1.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet2.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet3.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet4.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet5.jpg" alt="img here" :style="playercardstyle" ></img><img src="assets/dixet6.jpg" alt="img here" :style="playercardstyle" ></img></div><div v-else><p>Player Hand here - gamestate = {{gamestate}}</p></div>`,
+        props: ['gamestate','imgnumarray','playernumber','playercardselected'],
+        template: `<div v-if="gamestate==='playerchoosecard'">
+            <img :src="cardimages[0]" alt="img here" :style="getplayercardstyle(0)" @click="selectcard(0)" />
+            <img :src="cardimages[1]" alt="img here" :style="getplayercardstyle(1)" @click="selectcard(1)" />
+            <img :src="cardimages[2]" alt="img here" :style="getplayercardstyle(2)" @click="selectcard(2)" />
+            <img :src="cardimages[3]" alt="img here" :style="getplayercardstyle(3)" @click="selectcard(3)" />
+            <img :src="cardimages[4]" alt="img here" :style="getplayercardstyle(4)" @click="selectcard(4)" />
+            <img :src="cardimages[5] " alt="img here" :style="getplayercardstyle(5)" @click="selectcard(5)" />
+          </div>
+          <div v-else><p>Player Hand here - gamestate = {{gamestate}}</p>
+          </div>`,
         data(){
           return {
-            playercardstyle: {
-              width: '15vw',
-              height: '20vh',
-              padding: '0.5px'
-            }
+            playercardstyles: [{width: '15vw', height: '20vh', padding: '0.5px'},
+              {width: '15vw', height: '20vh', padding: '2px'},
+              {width: '15vw', height: '20vh', padding: '2px'},
+              {width: '15vw', height: '20vh', padding: '2px'},
+              {width: '15vw', height: '20vh', padding: '2px'},
+              {width: '15vw', height: '20vh', padding: '2px'}],
+            iters: 0,
+            cardimages: ['','','','','',''],
+            selectedimg: 0,
           }
+        },
+        methods: {
+          getplayercardstyle: function(idx){
+            return this.playercardstyles[idx];
+          },
+          selectrandomimg: function(){
+            console.log('player number: ', this.playernumber);
+            imgindex = Math.random()*this.imgnumarray.length + 20*(this.playernumber-1);
+            selectedimg = this.imgnumarray.splice(imgindex,1);
+            console.log('SELECTED IMG: '+selectedimg);
+            imgsrc = "assets/dixet".concat(selectedimg.toString(),".jpg");
+            return imgsrc;
+          },
+          selectcard: function(idx){
+            console.log("clicked card ", idx);
+            this.playercardstyles[idx].border = '2px solid green';
+            for(i=0; i<6; i++){
+              if(i !== idx){
+                this.playercardstyles[i].border = '';
+              };
+            };
+            this.selectedimg = idx;
+            this.playercardselected = idx;
+            console.log(this.playercardstyles[idx]);
+          }
+        },
+        created(){
+          for(i=0; i<6; i++){
+            this.cardimages[i] = this.selectrandomimg();
+          };
         }
       });
       app.component('controlbar', {
