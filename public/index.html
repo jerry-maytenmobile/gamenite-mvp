@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GameNite.App</title>
     <script src="https://unpkg.com/vue@next"></script>
+    <!-- roomId for socket.io -->
+    <script type="text/javascript">
+//      const ROOM_ID = "<%= roomId %>";
+      const ROOM_ID = "dixet";
+    </script>
+    <!-- peerjs for WebRTC video audio -->
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+    <!-- socket io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- CSS -->
+    <style>
+      #video-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill,18vw);
+        grid-auto-rows: 20vh;
+      }
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+    </style>
   </head>
   <body>
     <div id="app">
@@ -16,14 +38,14 @@
         <!-- video div element, and player caption (P.CAP.) element for each player
              P.CAP. element: player name, score, high-level game info.
              press-and-hold to see detailed player info               -->
-        <playervideo></playervideo>
+        <playervideo v-on:addplayers="addplayers($event)"></playervideo>
         <playercaption></playercaption>
       </div>
 
       <div id="gamearea">
         <!-- game board in the center, player hand towards the bottom -->
         <gameboard></gameboard>
-        <playerhand v-bind:gamestate="gamestate" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-bind:playercardselected="playercardselected"></playerhand>
+        <playerhand v-bind:gamestate="gamestate" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-on:playercardselected="selectedplayercard =$event"></playerhand>
       </div>
 
       <controlbar @playgame="changestate_playgame">
@@ -50,7 +72,7 @@
             // for player hand
             numPlayersSelected: 0, // how many players have selected their card
             imgnumarray: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
-            playercardselected: null,  // which card was selected
+            selectedplayercard: null,  // which card was selected
             // game state
             gamestate: 'setup',
             // for control bar
@@ -92,7 +114,13 @@
               this.infobarmsg = "Dealing new cards and resetting for next round";
             }
           },
-
+          // adds a new player to the game
+          addplayers(pids){
+            this.numPlayers = pids.playernames.length;
+            this.playerNames = pids.playernames;
+            this.playerScores = pids.playerscores;
+            console.log('PLAYER INFO: ', pids);
+          }
         },
 //        created(){
 //
@@ -117,14 +145,114 @@
       });
       app.component('playervideo', {
         props: [],
-        template: `<div :style="styleobject"><p>Player Video here</p></div>`,
+        emits: ['addplayers'],
+        template: `<div id="video-grid"></div>`,
         data(){
           return {
-            styleobject: {
-              color: 'red',
-              width: '100%'
-            }
+            socket: io('/'),
+            videoGrid: document.getElementById('video-grid'),
+            peers: {},
+            myPeer: null,
+            myVideo: document.createElement('video'),
           }
+        },
+        methods: {
+          connectToNewUser: function(userId, stream){
+            /// calls new user and adds our video stream to their video div element.
+            // peer.call establishes the peer-to-peer connection with userId, and sends our stream to them
+            const call = this.myPeer.call(userId, stream);
+            const video = document.createElement('video');
+            // when user replies (establishing the peer-to-peer connection), add THEIR video stream to our div video element (BUT THIS DOESN'T WORK??)
+            call.on('stream', userVideoStream => {
+              this.addVideoStream(video, userVideoStream);
+            });
+            // when user closes their video, remove their video element.
+            call.on('close', () => {
+              video.remove();
+            });
+
+            this.peers[userId] = call;
+          },
+          addVideoStream: function(video, stream){
+            // attaches stream to the video HTML element
+            video.srcObject = stream;
+            // once metadata is loaded, begin playing video/audio stream
+            video.addEventListener('loadedmetadata', () => {
+              video.play();
+            });
+            // add video HTML element to videoGrid div element on page
+            this.videoGrid.append(video);
+          },
+          addPlayersToGame: function( playerinfo ){
+            this.$emit('addplayers', playerinfo);
+          },
+        },
+        mounted(){
+          // for video
+          this.socket = io('/');
+          this.videoGrid = document.getElementById('video-grid');
+          this.peers = {};
+          // create a connection to Peer server, gives back a userId via open event
+          this.myPeer = new Peer(undefined, {
+            host: '/',
+            port: '3001',
+          });
+          // create a new video HTML element
+          this.myVideo = document.createElement('video');
+          this.myVideo.muted = true; // mute ourselves
+
+          // get access to microphone and camera
+          navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          }).then( stream => {
+            console.log('MYVIDEO: ', this.myVideo);
+            console.log('VIDEO GRID: ', this.videoGrid);
+            // after getting access, all video/audio output will go to stream variable. Attach stream to video HTML element, and then display it.
+            this.addVideoStream(this.myVideo, stream);
+
+            // when OTHER user successfully connects peer-to-peer, add their video stream.
+            this.myPeer.on('call', call => {
+              // answer call and send them our stream
+              call.answer(stream);
+              // create a new video element for them and stream
+              const video = document.createElement('video');
+              call.on('stream', userVideoStream => {
+                this.addVideoStream(video,userVideoStream);
+              });
+            });
+
+            // socket.on -> listens for the event 'user-connected' (fired by server, a new client joins room)
+            this.socket.on('user-connected', userId => {
+              console.log('User connected ', userId);
+              // establish a peer-to-peer connection with new user -> send them our stream
+              this.connectToNewUser(userId, stream);
+
+            });
+
+            // socket disconnected
+            this.socket.on('user-disconnected', userId => {
+              console.log(userId);
+              if (this.peers[userId]){
+                this.peers[userId].close();
+              };
+            });
+          });
+
+          // once Peer server returns, it will create an open event and pass back userId
+          this.myPeer.on('open', id => {
+            console.log('PEER ON OPEN():', id);
+            // emit roomId and userId back to server as emit event -> tells server that this client wants to join the room
+            this.socket.emit('join-room', ROOM_ID, id);
+            console.log('did this happen?', ROOM_ID);
+          });
+
+          // adding a new player to the room - THIS NEEDS TO COME AFTER PEER OPEN ON!
+          this.socket.on('update-player', playerinfo => {
+            console.log('updating player info...', playerinfo);
+            // update list of players
+            this.addPlayersToGame(playerinfo);
+          });
         }
       });
       app.component('playercaption',{
@@ -148,7 +276,7 @@
         template: `<div><p>Game Board Here </p></div>`,
       });
       app.component('playerhand', {
-        props: ['gamestate','imgnumarray','playernumber','playercardselected'],
+        props: ['gamestate','imgnumarray','playernumber'],
         template: `<div v-if="gamestate==='playerchoosecard'">
             <img :src="cardimages[0]" alt="img here" :style="getplayercardstyle(0)" @click="selectcard(0)" />
             <img :src="cardimages[1]" alt="img here" :style="getplayercardstyle(1)" @click="selectcard(1)" />
@@ -193,7 +321,8 @@
               };
             };
             this.selectedimg = idx;
-            this.playercardselected = idx;
+            // indicate index of player card selected as an emitted event back to parent component app
+            this.$emit('playercardselected', idx);
             console.log(this.playercardstyles[idx]);
           }
         },
