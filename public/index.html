@@ -26,6 +26,23 @@
         height: 100%;
         object-fit: cover;
       }
+      #player-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill,18vw);
+        grid-auto-rows: 5vh;
+      }
+      #image-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill,15vw);
+        grid-auto-rows: 25vh;
+        grid-gap: 5px;
+      }
+      #hand-grid {
+        display: grid;
+        grid-template-columns: repeat(6,15vw);
+        grid-auto-rows: 25vh;
+        grid-gap: 5px;
+      }
     </style>
   </head>
   <body>
@@ -38,17 +55,18 @@
         <!-- video div element, and player caption (P.CAP.) element for each player
              P.CAP. element: player name, score, high-level game info.
              press-and-hold to see detailed player info               -->
-        <playervideo v-on:addplayers="addplayers($event)"></playervideo>
-        <playercaption></playercaption>
+        <playervideo v-on:addplayers="addplayers($event)" v-on:addpeer="addpeer($event)" v-bind:socket="socket" v-on:myplayeridupdate="myplayerid=$event" v-on:mypeeridupdate="peerid=$event" v-on:removeplayer="removeplayer($event)" v-bind:myplayerid="myplayerid"></playervideo>
+        <playercaption v-bind:gamestate="gamestate" v-bind:playerinfolocal="playerinfolocal" v-bind:socket="socket"></playercaption>
       </div>
 
       <div id="gamearea">
         <!-- game board in the center, player hand towards the bottom -->
-        <gameboard></gameboard>
-        <playerhand v-bind:gamestate="gamestate" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-on:playercardselected="selectedplayercard =$event"></playerhand>
+        <gameboard v-bind:gamestate="gamestate" v-bind:centercards="centercards" v-bind:activeplayer="activeplayer" v-bind:centercardowners="centercardowners" v-on:centercardselected="notecentercardselected($event)"></gameboard>
+        <div><p>----------------------</p></div>
+        <playerhand v-bind:gamestate="gamestate" v-bind:mediaready="mediaready" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-on:playercardselected="notecardselected($event)"></playerhand>
       </div>
 
-      <controlbar @playgame="changestate_playgame">
+      <controlbar @playgame="socketemit_playgame" v-bind:buttonmessage="buttonmessage">
         <!-- very bottom contains controls for video/audio, settings,... -->
       </controlbar>
     </div>
@@ -62,66 +80,200 @@
             // for video
             isMuted: false,
             isVideo: true,
+            mediaready: false,
             // for player caption
             numPlayers: 1, // gets updated from server
-            playerNames: ['Host'], // gets updated from server
-            playerScores: [0], // gets updated from server
-            playernumber: 1, // which player are you
+            playerinfolocal: [{playerName: 'Host', playerScore: 0, playerNumber: 1, peerid: 'Host'}], // gets updated from server
+            myplayerid: 'Host',
+            peerid: '',
+            playernumber: 0, // which player are you
+            activeplayer: '', // who is the current clue giver (peer id)
+            activeplayername: '',
             // for game board
-            centerImgArray: [], // gets updated from server
+            centercards: [], // gets updated from server
+            centercardowners: [], // who owns each card
+            selectedcentercard_peer: '',
             // for player hand
             numPlayersSelected: 0, // how many players have selected their card
             imgnumarray: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
-            selectedplayercard: null,  // which card was selected
+            selectedplayercard: null,  // which card was selected (the index in imgnumarray)
             // game state
             gamestate: 'setup',
+            howmanyturns: 0,
             // for control bar
-            playButtonActive: true
+            playButtonActive: true,
+            buttonmessage: 'Play Game',
+            // for communication
+            socket: io('/'),
+            peers: {},
           };
+        },
+        created(){
+          this.myplayerid = window.prompt("What's your Name?","Player 1");
         },
 //        computed: {
 //
 //        },
         methods: {
-          changestate_playgame(){
+          socketemit_playgame(){
             if(this.playButtonActive){
+              this.resetturn();
               this.gamestate = 'playerchoosecard';
-              this.infobarmsg = "Active player chooses card and gives clue. Then other players choose a card.";
               this.playButtonActive = false;
+              this.infobarmsg = this.activeplayername + " chooses card and gives clue. Then other players choose a card.";
+              this.socket.emit('changestate', 'playerchoosecard', {'playbuttonactive': false, 'infomsg': this.activeplayername + " chooses card and gives clue. Then other players choose a card."});
             }
           },
-          changestate_showcentercards(){
-            if(this.playButtonActive === false){
-              this.gamestate = 'showcentercards';
-              this.infobarmsg = "All players choose the center card you think is from the active player.";
-            }
-          },
-          changestate_revealandupdatescore(){
+          changestate_revealandupdatescore(stateparams){
             if(this.playButtonActive === false){
               this.gamestate = 'revealandupdatescore';
-              this.infobarmsg = "Here is what everyone chose!";
+              console.log('in change_revealandupdatescore(): ', stateparams);
+              finalstring = "Round over! Final results: ";
+              for(i=0;i<stateparams['peerlist'].length;i++){
+                if(stateparams['peerlist'][i]['scorechange'] > 0){
+                  score = stateparams['peerlist'][i]['scorechange'];
+                  // other players guessed right
+                  if(stateparams['peerlist'][i]['peeruserId'] !== stateparams['oldactiveplayer']){
+                    finalstring += stateparams['peerlist'][i]['playerId'] + " (+" + score.toString() + "pts) was correct!  "
+                  } else {
+                    // points for active player
+                    finalstring += stateparams['peerlist'][i]['playerId'] + " (+" + score.toString() + "pts) as active player.  "
+                  }
+
+                }
+              }
+              this.infobarmsg = finalstring + " Ready for next round?";
+              this.buttonmessage = this.activeplayername+' - Click Start Next Turn!';
+              if(this.activeplayer === this.peerid){
+                this.playButtonActive = true;
+              }
             }
           },
           changestate_gamedone(){
             if(this.playButtonActive === false){
               this.gamestate = 'gamedone';
-              this.infobarmsg = "We have a winner!";
+              maxscore = 0;
+              winner = '';
+              for(i=0;i<this.playerinfolocal.length;i++){
+                if(this.playerinfolocal[i]['playerScore'] > maxscore){
+                  winner = this.playerinfolocal[i]['playerName'];
+                } else if(this.playerinfolocal[i]['playerScore'] == maxscore){
+                  winner = winner.concat(' and ', this.playerinfolocal[i]['playerName']);
+                }
+              }
+              this.infobarmsg = "Game over. The winner is "+winner;
             }
           },
-          changestate_resetturn(){
-            if(this.playButtonActive === false){
-              this.gamestate = 'resetturn';
-              this.infobarmsg = "Dealing new cards and resetting for next round";
+          resetturn(){
+            // reset
+            this.buttonmessage = '.';
+            this.imgnumarray = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19];
+            this.centercards = [];
+            this.centercardowners = [];
+            this.selectedcentercard_peer = '';
+            this.selectedplayercard = null;
+            this.numPlayersSelected = 0;
+            this.howmanyturns += 1;
+            if(this.howmanyturns >= 8){
+              this.changestate_gamedone();
             }
           },
           // adds a new player to the game
           addplayers(pids){
+            console.log('my peer id: ', this.peerid);
+            console.log('adding players: ', pids);
             this.numPlayers = pids.playernames.length;
-            this.playerNames = pids.playernames;
-            this.playerScores = pids.playerscores;
+            this.playerinfolocal = [];
+            for(i=0;i<pids.playernames.length;i++){
+                this.playerinfolocal.push({
+                  playerName: pids.playernames[i],
+                  playerScore: pids.playerscores[i],
+                  playerNumber: pids.playernums[i],
+                  peerid: pids.playerids[i]
+                });
+                if(pids.playerids[i] === this.peerid){
+                  this.playernumber = pids.playernums[i];
+                }
+            };
+            this.activeplayer = pids.activeplayer; // initialize active player as first player (host)
+            for(i=0;i<this.playerinfolocal.length;i++){
+                if(this.playerinfolocal[i]['peerid'] === this.activeplayer){
+                  this.activeplayername = this.playerinfolocal[i]['playerName'];
+                }
+            }
             console.log('PLAYER INFO: ', pids);
+            console.log('PLAYER NUMBER: ', pids.playernums[0]);
+            this.mediaready = true;
+          },
+          addpeer(peerinfo){
+            console.log('ADDING PEER: ', peerinfo);
+            this.peers[peerinfo['userid']] = peerinfo['peercall'];
+          },
+          // note the player card selected
+          notecardselected( whichcard ){
+            this.selectedplayercard = whichcard['cardindex'];
+            this.socket.emit('cardselected', this.peerid, {'whichcard': whichcard['cardfile']});
+          },
+          notecentercardselected( whichpeerandindex ){
+            this.selectedcentercard_peer = whichpeerandindex['owner'];
+            this.socket.emit('centercardselected', this.peerid, {'whichpeer': whichpeerandindex, 'activeplayer': this.activeplayer, 'peerwhoselected': this.peerid});
+          },
+          removeplayer( whichplayer ){
+            // remove by playername
+            for(i=0;i<this.playerinfolocal.length;i++){
+              if(whichplayer['playername']===this.playerinfolocal[i]['playerName']){
+                this.playerinfolocal.splice(i,1);
+              }
+            }
           }
         },
+        mounted(){
+          // socket disconnected
+          this.socket.on('user-disconnected', userId => {
+            console.log(userId);
+            if (this.peers[userId]){
+              this.peers[userId].close();
+            };
+          });
+
+          this.socket.on('changestate_playgame', stateparams => {
+            this.playButtonActive = stateparams['playbuttonactive'];
+            this.infobarmsg = stateparams['infomsg'];
+            this.buttonmessage = '.';
+            this.gamestate = 'playerchoosecard';
+            this.centercards = [];
+          });
+// io.in(roomId).emit('changestate_showcentercards', {'whichcardschosen': whichcardschosen});
+          this.socket.on('changestate_showcentercards', stateparams => {
+            console.log('in changestate_showcentercards() ', stateparams);
+            centercards_temp = [];
+            centercardowners_temp = [];
+            for(i=0;i<stateparams['whichcardschosen'].length;i++){
+              centercards_temp.push(stateparams['whichcardschosen'][i]['whichcard']);
+              centercardowners_temp.push(stateparams['whichcardschosen'][i]['peerid']);
+            }
+            this.centercardowners = centercardowners_temp;
+            this.centercards = centercards_temp;
+            this.gamestate = 'showcentercards';
+            this.infobarmsg = "All other players choose the center card you think is from "+this.activeplayername;
+          });
+
+          // after everyone has chosen center cards, update scores
+          this.socket.on('changestate_updatescores', stateparams => {
+            console.log('in changestate_updatescores ', stateparams);
+            for(i=0;i<stateparams['playerinfo']['playernames'].length;i++){
+                this.playerinfolocal[i]['playerScore'] = stateparams['playerinfo']['playerscores'][i];
+            };
+            // update active player
+            this.activeplayer = stateparams['playerinfo']['activeplayer'];
+            for(i=0;i<this.playerinfolocal.length;i++){
+                if(this.playerinfolocal[i]['peerid'] === this.activeplayer){
+                  this.activeplayername = this.playerinfolocal[i]['playerName'];
+                }
+            }
+            this.changestate_revealandupdatescore(stateparams);
+          });
+        }
 //        created(){
 //
 //        },
@@ -144,14 +296,14 @@
         }
       });
       app.component('playervideo', {
-        props: [],
-        emits: ['addplayers'],
+        props: ['socket', 'myplayerid'],
+        emits: ['addplayers', 'addpeer', 'myplayeridupdate', 'mypeeridupdate','removeplayer'],
         template: `<div id="video-grid"></div>`,
         data(){
           return {
-            socket: io('/'),
+          //  socket: io('/'),
             videoGrid: document.getElementById('video-grid'),
-            peers: {},
+        //    peers: {},
             myPeer: null,
             myVideo: document.createElement('video'),
           }
@@ -171,7 +323,8 @@
               video.remove();
             });
 
-            this.peers[userId] = call;
+            this.$emit('addpeer', {'userid': userId, 'peercall': call});
+            // this.peers[userId] = call;
           },
           addVideoStream: function(video, stream){
             // attaches stream to the video HTML element
@@ -182,6 +335,8 @@
             });
             // add video HTML element to videoGrid div element on page
             this.videoGrid.append(video);
+            // media is ready
+            // this.$emit.mediaisready(true);
           },
           addPlayersToGame: function( playerinfo ){
             this.$emit('addplayers', playerinfo);
@@ -189,9 +344,9 @@
         },
         mounted(){
           // for video
-          this.socket = io('/');
+//          this.socket = io('/');
           this.videoGrid = document.getElementById('video-grid');
-          this.peers = {};
+//          this.peers = {};
           // create a connection to Peer server, gives back a userId via open event
           this.myPeer = new Peer(undefined, {
             host: '/',
@@ -211,7 +366,7 @@
             // after getting access, all video/audio output will go to stream variable. Attach stream to video HTML element, and then display it.
             this.addVideoStream(this.myVideo, stream);
 
-            // when OTHER user successfully connects peer-to-peer, add their video stream.
+            // once OTHER client calls peer-to-peer, we answer with our  video stream.
             this.myPeer.on('call', call => {
               // answer call and send them our stream
               call.answer(stream);
@@ -227,15 +382,6 @@
               console.log('User connected ', userId);
               // establish a peer-to-peer connection with new user -> send them our stream
               this.connectToNewUser(userId, stream);
-
-            });
-
-            // socket disconnected
-            this.socket.on('user-disconnected', userId => {
-              console.log(userId);
-              if (this.peers[userId]){
-                this.peers[userId].close();
-              };
             });
           });
 
@@ -243,60 +389,113 @@
           this.myPeer.on('open', id => {
             console.log('PEER ON OPEN():', id);
             // emit roomId and userId back to server as emit event -> tells server that this client wants to join the room
-            this.socket.emit('join-room', ROOM_ID, id);
-            console.log('did this happen?', ROOM_ID);
+            this.socket.emit('join-room', ROOM_ID, id, this.myplayerid);
+            // add this as a peer
+            this.$emit('addpeer', {'userid': id, 'peercall': null});
+            // record player id of you
+            this.$emit('myplayeridupdate', this.myplayerid);
+            this.$emit('mypeeridupdate', id);
           });
 
           // adding a new player to the room - THIS NEEDS TO COME AFTER PEER OPEN ON!
           this.socket.on('update-player', playerinfo => {
             console.log('updating player info...', playerinfo);
             // update list of players
-            this.addPlayersToGame(playerinfo);
+            if(playerinfo['status']==='connecting'){
+              this.addPlayersToGame(playerinfo);
+            }
           });
+
+          this.socket.on('remove-player', playerinfo => {
+            console.log('removing player...', playerinfo);
+            // update list of players
+            this.$emit('removeplayer', playerinfo);
+          });
+
         }
       });
       app.component('playercaption',{
-        props: ['gamestate'],
-        template: `<div :style="styleobject"><p>Player Caption here</p></div>`,
+        props: ['gamestate', 'playerinfolocal','socket'],
+        template: `<div id="player-grid"><div v-for="player in playerinfolocal"><span :style="styleobject">{{player.playerName}}  <b>SCORE: {{player.playerScore}}</b></span></div></div>`,
         data(){
           return {
             styleobject: {
-              color: 'green',
-              width: '100%'
+              color: 'black',
+              border: '2px solid black',
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
             }
           }
-        }
+        },
       });
 //      app.component('gamearea', {
 //        props: [],
 //        template: `<span></span>`,
 //      });
       app.component('gameboard', {
-        props: [],
-        template: `<div><p>Game Board Here </p></div>`,
+        props: ['centercards', 'centercardowners','activeplayer','gamestate'],
+        emits: ['centercardselected'],
+        data(){
+          return {
+            centercardstyles: [{width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+            {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+            {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+            {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+            {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'}],
+            selectedcenterimg: 0,
+          }
+        },
+        template: `<div id="image-grid">
+          <div v-for="ccard in centercards">
+            <img :src=ccard alt="img here" :style="centercardstyles[centercards.indexOf(ccard)]" @click="selectcentercard(centercards.indexOf(ccard))" /></div></div>`,
+        methods: {
+          selectcentercard(idx){
+            console.log('in selectcentercard', idx);
+            console.log('card owners: ', this.centercardowners[0], ' ', this.centercardowners[1], ' ', this.centercardowners[2]);
+            // everyone except active player can choose
+            if(this.peerid !== this.activeplayer){
+              console.log("clicked card ", idx);
+              this.centercardstyles[idx].border = '2px solid green';
+              for(i=0; i<this.centercards.length; i++){
+                if(i !== idx){
+                  this.centercardstyles[i].border = '';
+                };
+              };
+              this.selectedcenterimg = idx;
+              // indicate index of center selected and the owner of that card as an emitted event back to parent component app
+              this.$emit('centercardselected', {'idx': idx, 'owner': this.centercardowners[idx]});
+            };
+          },
+        },
+        created(){
+          this.$watch(()=>this.gamestate, (newVal, oldVal) => {
+            if(this.gamestate === 'playerchoosecard'){
+              for(i=0; i<this.centercardstyles.length; i++){
+                this.centercardstyles[i].border = '';
+              }
+            }
+          }, {deep: true} );
+        }
       });
       app.component('playerhand', {
-        props: ['gamestate','imgnumarray','playernumber'],
-        template: `<div v-if="gamestate==='playerchoosecard'">
-            <img :src="cardimages[0]" alt="img here" :style="getplayercardstyle(0)" @click="selectcard(0)" />
-            <img :src="cardimages[1]" alt="img here" :style="getplayercardstyle(1)" @click="selectcard(1)" />
-            <img :src="cardimages[2]" alt="img here" :style="getplayercardstyle(2)" @click="selectcard(2)" />
-            <img :src="cardimages[3]" alt="img here" :style="getplayercardstyle(3)" @click="selectcard(3)" />
-            <img :src="cardimages[4]" alt="img here" :style="getplayercardstyle(4)" @click="selectcard(4)" />
-            <img :src="cardimages[5] " alt="img here" :style="getplayercardstyle(5)" @click="selectcard(5)" />
-          </div>
+        props: ['gamestate','imgnumarray','playernumber','mediaready'],
+        emits: ['playercardselected','drawcards'],
+        template: `<div id="hand-grid" v-if="['playerchoosecard','showcentercards'].includes(gamestate)"><div v-for="cimage in cardimages">
+            <img :src="cimage" alt="img here" :style="playercardstyles[cardimages.indexOf(cimage)]" @click="selectcard(cardimages.indexOf(cimage))" />
+          </div></div>
           <div v-else><p>Player Hand here - gamestate = {{gamestate}}</p>
           </div>`,
         data(){
           return {
-            playercardstyles: [{width: '15vw', height: '20vh', padding: '0.5px'},
-              {width: '15vw', height: '20vh', padding: '2px'},
-              {width: '15vw', height: '20vh', padding: '2px'},
-              {width: '15vw', height: '20vh', padding: '2px'},
-              {width: '15vw', height: '20vh', padding: '2px'},
-              {width: '15vw', height: '20vh', padding: '2px'}],
-            iters: 0,
+            playercardstyles: [{width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+              {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+              {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+              {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+              {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'},
+              {width: '100%', height: '100%', padding: '2px', objectFit: 'cover'}],
             cardimages: ['','','','','',''],
+            iters: 0,
             selectedimg: 0,
           }
         },
@@ -304,38 +503,54 @@
           getplayercardstyle: function(idx){
             return this.playercardstyles[idx];
           },
+          selectcard: function(idx){
+            if(this.gamestate==='playerchoosecard'){
+              console.log("clicked card ", idx);
+              this.playercardstyles[idx].border = '2px solid green';
+              for(i=0; i<6; i++){
+                if(i !== idx){
+                  this.playercardstyles[i].border = '';
+                };
+              };
+              // indicate player card selected as an emitted event back to parent component app
+              this.$emit('playercardselected', {'cardfile': this.cardimages[idx], 'cardindex': this.selectedimg});
+              console.log(this.playercardstyles);
+            };
+          },
           selectrandomimg: function(){
             console.log('player number: ', this.playernumber);
-            imgindex = Math.random()*this.imgnumarray.length + 20*(this.playernumber-1);
-            selectedimg = this.imgnumarray.splice(imgindex,1);
-            console.log('SELECTED IMG: '+selectedimg);
-            imgsrc = "assets/dixet".concat(selectedimg.toString(),".jpg");
+
+            imgindex = Math.floor(Math.random()*this.imgnumarray.length);
+            imgindex_shift = imgindex + 20*(this.playernumber-1);
+            console.log('imgindex: ', imgindex);
+            console.log('imgindex_shift: ', imgindex_shift);
+            this.selectedimg = parseInt(this.imgnumarray.splice(imgindex,1)) + 20*(this.playernumber-1);
+            console.log('SELECTED IMG: ',this.selectedimg);
+            imgsrc = "assets/dixet".concat(this.selectedimg.toString(),".jpg");
             return imgsrc;
           },
-          selectcard: function(idx){
-            console.log("clicked card ", idx);
-            this.playercardstyles[idx].border = '2px solid green';
+          random6cards: function(){
             for(i=0; i<6; i++){
-              if(i !== idx){
-                this.playercardstyles[i].border = '';
-              };
-            };
-            this.selectedimg = idx;
-            // indicate index of player card selected as an emitted event back to parent component app
-            this.$emit('playercardselected', idx);
-            console.log(this.playercardstyles[idx]);
-          }
+              this.cardimages[i] = this.selectrandomimg();
+            }
+          },
         },
         created(){
-          for(i=0; i<6; i++){
-            this.cardimages[i] = this.selectrandomimg();
-          };
-        }
+          this.$watch(()=> [this.gamestate, this.mediaready, this.playernumber], (newVal, oldVal) => {
+            if(this.gamestate === 'playerchoosecard' && this.mediaready===true && this.playernumber !== 0){
+              this.random6cards();
+              for(i=0; i<this.playercardstyles.length; i++){
+                this.playercardstyles[i].border = '';
+              }
+            }
+            console.log('in watch(): (gamestate, mediaready, playernumber)', this.gamestate, this.mediaready, this.playernumber);
+          }, {deep: true} );
+        },
       });
       app.component('controlbar', {
-        props: [],
+        props: ['buttonmessage'],
         emits: ['playgame'],
-        template: `<div><button :style="buttonstyle" @click="emitplaygame">Play Game</button></div>`,
+        template: `<div><button :style="buttonstyle" @click="emitplaygame">{{buttonmessage}}</button></div>`,
         data(){
           return {
             buttonstyle: {
