@@ -1,10 +1,17 @@
 const express = require('express');
+
+// get credentials for http SSL certificate
+var fs = require('fs');
+var privateKey  = fs.readFileSync('/etc/letsencrypt/live/gamenite.app/privkey.pem', 'utf8');
+var certificate = fs.readFileSync('/etc/letsencrypt/live/gamenite.app/fullchain.pem', 'utf8');
+var credentials = {key: privateKey, cert: certificate};
+
 // create express serverapp
 const serverapp = express();
 // create server
-const server = require('http').Server(serverapp);
+const server = require('https').createServer(credentials, serverapp);
 // connect server to socket
-const io = require('socket.io')(server);
+const io = require('/home/ubuntu/gamenite-mvp/node_modules/socket.io')(server);
 // get random roomId using uuid
 // const { v4: uuidV4 } = require('uuid');
 // keep track of players and player names
