@@ -302,44 +302,68 @@
         data(){
           return {
           //  socket: io('/'),
-            videoGrid: document.getElementById('video-grid'),
+            videoGrid: null,
         //    peers: {},
             myPeer: null,
-            myVideo: document.createElement('video'),
+            myVideo: null,
+            myStream: null,
+            videoElements: {},
+            streamIds: [],
           }
         },
         methods: {
           connectToNewUser: function(userId, stream){
-            /// calls new user and adds our video stream to their video div element.
-            // peer.call establishes the peer-to-peer connection with userId, and sends our stream to them
+
+            /// calls new user and sends them our video stream.
+            // on their end, peer.call() will get called, and they will answer with stream
             const call = this.myPeer.call(userId, stream);
+            console.log('in connectToNewUser(): trying to connect to new user ', userId, stream);
 
-            // when user replies (establishing the peer-to-peer connection), add THEIR video stream to our div video element (BUT THIS DOESN'T WORK??)
+            // when user answers and replies
+            // we add THEIR video stream to our div video element
 	          call.on('stream', userVideoStream => {
-              const video = document.createElement('video');
-	            console.log('connecting to video stream of new user ', userId);
-              this.addVideoStream(video, userVideoStream);
+              console.log('peer.on(call) - received stream back.');
+
+              // add their video stream to our DOM
+              if(Object.keys(this.videoElements).includes(userId) === false){
+                let theirvideo = document.createElement('video');
+                this.videoElements[userId] = theirvideo;
+                this.addVideoStream(theirvideo, userVideoStream);
 	               console.log('added video stream for ', userId);
-              this.$emit('addpeer', {'userid': userId, 'peercall': call});		       
-            });
-            
-            // when user closes their video, remove their video element.
-            call.on('close', () => {
-	             console.log('closing video for ', userId);
-               video.remove();
+               }
+
+              // when user closes their video, remove their video element.
+              call.on('close', () => {
+                console.log('closing video for ', userId);
+                theirvideo.remove();
+              });
             });
 
+            // ON error, will display connection not established
+            call.on('error', () => {
+              console.log('ERROR: peer connection not established to ', userId);
+            });
+
+            this.$emit('addpeer', {'userid': userId, 'peercall': call});
             // this.peers[userId] = call;
+          },
+          appendVideo(myvideo){
+            this.videoGrid.append(myvideo);
+            console.log('appended video ', myvideo);
           },
           addVideoStream: function(video, stream){
             // attaches stream to the video HTML element
             video.srcObject = stream;
+            this.appendVideo(video);
             // once metadata is loaded, begin playing video/audio stream
             video.addEventListener('loadedmetadata', () => {
-  	           console.log('video playing now...');
+  	           console.log('video trying to play now...');
 	              let playPromise = video.play();
-                playPromise.then(() =>
-                  this.videoGrid.append(video));
+                if(playPromise !== undefined){
+                  playPromise.then(() =>
+                    console.log('video is playing correctly!'))
+                    .catch(console.log('video did not play correctly...'));
+                }
             });
             // add video HTML element to videoGrid div element on page
 //            this.videoGrid.append(video);
@@ -351,84 +375,96 @@
           },
         },
 	      created(){
-          this.myPeer = new Peer(undefined, {
-            host: '/',
-            port: '3001',
-	        });
+
 	      },
         mounted(){
           // for video
 //          this.socket = io('/');
-//          this.videoGrid = document.getElementById('video-grid');
 //          this.peers = {};
-          // create a connection to Peer server, gives back a userId via open event
-//          this.myPeer = new Peer(undefined, {
-//            host: '/',
-//            port: '3001',
-//          });
-          // create a new video HTML element
-//          this.myVideo = document.createElement('video');
-//          this.myVideo.muted = true; // mute ourselves
 
           // get access to microphone and camera
           navigator.mediaDevices.getUserMedia({
             video: true,
             audio: true,
           }).then( stream => {
-	           this.videoGrid = document.getElementById('video-grid');
-	           this.myVideo = document.createElement('video');
-	           this.myVideo.muted = true; // mute ourselves
-            console.log('MYVIDEO: ', this.myVideo);
-            console.log('VIDEO GRID: ', this.videoGrid);
-            // after getting access, all video/audio output will go to stream variable. Attach stream to video HTML element, and then display it.
-            this.addVideoStream(this.myVideo, stream);
-	           console.log('video should now be playing for self.');
-            // once OTHER client calls peer-to-peer, we answer with our  video stream.
-            this.myPeer.on('call', call => {
-              // answer call and send them our stream
-              call.answer(stream);
-              // create a new video element for them and stream
-              const video = document.createElement('video');
-              call.on('stream', userVideoStream => {
-                this.addVideoStream(video,userVideoStream);
-              });
-            });
+            // once microphone/camera are accessed, create DOM video element
+            if(this.videoGrid === null){
+              this.videoGrid = document.getElementById('video-grid');
+              console.log('VIDEO GRID: ', this.videoGrid);
+            }
+            if(this.myVideo === null){
+              this.myVideo = document.createElement('video');
+              this.videoElements['self'] = this.myVideo;
+              this.myVideo.muted = true; // mute ourselves
+              console.log('MYVIDEO: ', this.myVideo);
+              if(this.myStream === null){
+                this.myStream = stream;
+              }
+              // all video/audio output will go to stream variable.
+              // Attach stream to video HTML element, and then display it.
+              this.addVideoStream(this.myVideo, this.myStream);
+              console.log('video should now be playing for self!');
+            }
 
             // socket.on -> listens for the event 'user-connected' (fired by server, a new client joins room)
             this.socket.on('user-connected', userId => {
               console.log('User connected ', userId);
               // establish a peer-to-peer connection with new user -> send them our stream
-              this.connectToNewUser(userId, stream);
+              this.connectToNewUser(userId, this.myStream);
             });
-          });
 
-          // once Peer server returns, it will create an open event and pass back userId
-          this.myPeer.on('open', id => {
-            console.log('PEER ON OPEN():', id);
-            // emit roomId and userId back to server as emit event -> tells server that this client wants to join the room
-            this.socket.emit('join-room', ROOM_ID, id, this.myplayerid);
-            // add this as a peer
-            this.$emit('addpeer', {'userid': id, 'peercall': null});
-            // record player id of you
-            this.$emit('myplayeridupdate', this.myplayerid);
-            this.$emit('mypeeridupdate', id);
-          });
+            // adding a new player to the room - THIS NEEDS TO COME AFTER PEER OPEN ON!
+            this.socket.on('update-player', playerinfo => {
+              console.log('updating player info...', playerinfo);
+              // update list of players
+              if(playerinfo['status']==='connecting'){
+                this.addPlayersToGame(playerinfo);
+              }
+            });
 
-          // adding a new player to the room - THIS NEEDS TO COME AFTER PEER OPEN ON!
-          this.socket.on('update-player', playerinfo => {
-            console.log('updating player info...', playerinfo);
-            // update list of players
-            if(playerinfo['status']==='connecting'){
-              this.addPlayersToGame(playerinfo);
-            }
-          });
+            this.socket.on('remove-player', playerinfo => {
+              console.log('removing player...', playerinfo);
+              // update list of players
+              this.$emit('removeplayer', playerinfo);
+            });
 
-          this.socket.on('remove-player', playerinfo => {
-            console.log('removing player...', playerinfo);
-            // update list of players
-            this.$emit('removeplayer', playerinfo);
-          });
+            // create Peer and join room AFTER socket events are established.
+            this.myPeer = new Peer(undefined, {
+              host: '/',
+              port: '3001',
+            });
 
+            // once Peer server returns, it will create an open event and pass back userId
+            this.myPeer.on('open', id => {
+              console.log('PEER ON OPEN():', id);
+              // emit roomId and userId back to server as emit event -> tells server that this client wants to join the room
+              this.socket.emit('join-room', ROOM_ID, id, this.myplayerid);
+              // add this as a peer
+              this.$emit('addpeer', {'userid': id, 'peercall': null});
+              // record player id of you
+              this.$emit('myplayeridupdate', this.myplayerid);
+              this.$emit('mypeeridupdate', id);
+            });
+
+            // once OTHER client calls peer-to-peer, we answer with our video stream.
+            this.myPeer.on('call', call => {
+              console.log('peer.on(call) - received a call');
+              // answer call and send them our stream
+              call.answer(this.myStream);
+              // create a new video element for them and stream
+              call.on('stream', userVideoStream => {
+                if(this.streamIds.includes(userVideoStream['id'])===false){
+                  console.log('adding stream, ', userVideoStream);
+                  this.streamIds.push(userVideoStream['id']);
+                  const othervideo = document.createElement('video');
+                  this.addVideoStream(othervideo,userVideoStream);
+                }
+              });
+            });
+
+          }).catch( function(error){
+            console.log('ERROR: could not create video for self - navigator.mediaDevices.getuserMedia error ', error);
+          });
         }
       });
       app.component('playercaption',{
