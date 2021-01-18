@@ -67,7 +67,7 @@
         <playerhand v-bind:gamestate="gamestate" v-bind:mediaready="mediaready" v-bind:imgnumarray="imgnumarray" v-bind:playernumber="playernumber" v-on:playercardselected="notecardselected($event)"></playerhand>
       </div>
 
-      <controlbar @playgame="socketemit_playgame" v-bind:buttonmessage="buttonmessage">
+      <controlbar @playgame="socketemit_playgame" @playgame2="socketemit_playgame2" v-bind:buttonmessage="buttonmessage">
         <!-- very bottom contains controls for video/audio, settings,... -->
       </controlbar>
     </div>
@@ -119,11 +119,19 @@
           socketemit_playgame(){
             if(this.playButtonActive){
               this.resetturn();
+//              this.gamestate = 'playerchoosecard';
               this.gamestate = 'playerchoosecard';
               this.playButtonActive = false;
               this.infobarmsg = this.activeplayername + " chooses card and gives clue. Then other players choose a card.";
-              this.socket.emit('changestate', 'playerchoosecard', {'playbuttonactive': false, 'infomsg': this.activeplayername + " chooses card and gives clue. Then other players choose a card."});
+              this.socket.emit('changestate', this.gamestate, {'playbuttonactive': false, 'infomsg': this.activeplayername + " chooses card and gives clue. Then other players choose a card."});
             }
+          },
+          socketemit_playgame2(){
+            this.resetturn();
+            this.gamestate = 'startgame';
+            this.playButtonActive = false;
+            this.infobarmsg = this.activeplayername + " chooses card and gives clue. Then other players choose a card.";
+            this.socket.emit('changestate', this.gamestate, {'playbuttonactive': false, 'infomsg': this.activeplayername + " chooses card and gives clue. Then other players choose a card."});
           },
           changestate_revealandupdatescore(stateparams){
             if(this.playButtonActive === false){
@@ -242,7 +250,19 @@
               this.peers[userId].close();
             };
           });
-
+          // if 'reset game' was clicked
+          this.socket.on('changestate_playgame2', stateparams => {
+            this.playButtonActive = stateparams['playbuttonactive'];
+            this.infobarmsg = stateparams['infomsg'];
+            this.buttonmessage = '.';
+            this.gamestate = 'playerchoosecard';
+            this.centercards = [];
+            for(i=0;i<stateparams['playerinfo']['playernames'].length;i++){
+              this.playerinfolocal[i]['playerScore'] = stateparams['playerinfo']['playerscores'][i];
+            }
+            this.activeplayer = stateparams['playerinfo']['activeplayer'];
+          });
+          // if "play game" was clicked
           this.socket.on('changestate_playgame', stateparams => {
             this.playButtonActive = stateparams['playbuttonactive'];
             this.infobarmsg = stateparams['infomsg'];
@@ -662,17 +682,22 @@
             console.log('player number: ', this.playernumber);
 
             imgindex = Math.floor(Math.random()*this.imgnumarray.length);
+            this.selectedimg = parseInt(this.imgnumarray.splice(imgindex,1)) + 20*(this.playernumber-1);
             imgindex_shift = imgindex + 20*(this.playernumber-1);
+            console.log('current img array: ', this.imgnumarray);
             console.log('imgindex: ', imgindex);
             console.log('imgindex_shift: ', imgindex_shift);
-            this.selectedimg = parseInt(this.imgnumarray.splice(imgindex,1)) + 20*(this.playernumber-1);
             console.log('SELECTED IMG: ',this.selectedimg);
             imgsrc = "assets/dixet".concat(this.selectedimg.toString(),".jpg");
             return imgsrc;
           },
           random6cards: function(){
+            myimages = []
             for(i=0; i<6; i++){
-              this.cardimages[i] = this.selectrandomimg();
+              myimages.push(this.selectrandomimg());
+            }
+            for(i=0; i<6; i++){
+              this.cardimages[i] = myimages[i];
             }
           },
         },
@@ -690,8 +715,8 @@
       });
       app.component('controlbar', {
         props: ['buttonmessage'],
-        emits: ['playgame'],
-        template: `<div><button :style="buttonstyle" @click="emitplaygame">{{buttonmessage}}</button></div>`,
+        emits: ['playgame','playgame2'],
+        template: `<div><button :style="buttonstyle" @click="emitplaygame">{{buttonmessage}}</button></div><div><p :style="buttonstyle">.</p><p :style="buttonstyle">.</p></div><div><button :style="buttonstyle" @click="emitplaygame2">Reset Game</button></div>`,
         data(){
           return {
             buttonstyle: {
@@ -703,7 +728,10 @@
         methods: {
           emitplaygame() {
             this.$emit('playgame');
-          }
+          },
+          emitplaygame2(){
+            this.$emit('playgame2');
+          },
         }
       });
 

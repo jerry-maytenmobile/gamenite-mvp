@@ -33,6 +33,7 @@ let peerlist = [];
 let peers = [];
 let streamids = {};
 let current_activeplayer = 0;
+let playerinfo = {};
 const POINT_SCORE = 3;
 
 function haspeer(cc, which_peer){
@@ -95,7 +96,7 @@ io.on('connection', socket => {
     playerscores.push(0);
     thisplayernum = available_playernums.pop();
     playernums.push(thisplayernum);
-    let playerinfo = {'playernames': playernames, 'playerscores': playerscores, 'playernums': playernums, 'playerids': peers, 'activeplayer': peerlist[current_activeplayer]['peeruserId'], 'status': 'connecting'};
+    playerinfo = {'playernames': playernames, 'playerscores': playerscores, 'playernums': playernums, 'playerids': peers, 'activeplayer': peerlist[current_activeplayer]['peeruserId'], 'status': 'connecting'};
     io.in(roomId).emit('update-player', playerinfo);
 
     // when user disconnects
@@ -104,7 +105,7 @@ io.on('connection', socket => {
       player_removed = playernames.splice(playernames.indexOf(peer2player[peeruserId]), 1);
       playerscores.splice(playernames.indexOf(peer2player[peeruserId]), 1);
       pnum = playernums.splice(playernames.indexOf(peer2player[peeruserId]), 1);
-      avchangestateailable_playernums.push(pnum);
+      available_playernums.push(pnum);
 //      let playerinfo = {'playernames': playernames, 'playerscores': playerscores, 'playernums': playernums, 'status': 'disconnecting'};
       io.in(roomId).emit('remove-player', {'playername': player_removed});
     });
@@ -126,7 +127,20 @@ io.on('connection', socket => {
           peerlist[i]['peerswhochoseyourcard'] = [];
           peerlist[i]['scorechange'] = 0;
         }
-      };
+      } else if(whatstate == 'startgame'){
+        howmanycardschosen = 0;
+        whichcardschosen = [];
+        howmanycentercardschosen = 0;
+        whichcentercardschosen = [];
+//        current_activeplayer = 0;
+        for(i=0;i<playerinfo['playernames'].length;i++){
+          playerscores[i] = 0;
+          playerinfo['playerscores'][i] = 0;
+        }
+        // playerinfo['activeplayer'] = peerlist[current_activeplayer]['peeruserId'];
+        options['playerinfo'] = playerinfo;
+        io.in(roomId).emit('changestate_playgame2', options);
+      }
     });
     socket.on('cardselected', (peerid3, options) => {
       console.log('card selected by ', peerid3, ' which card ', options['whichcard']);
