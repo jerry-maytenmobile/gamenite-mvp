@@ -25,6 +25,7 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
+        z-index: -1;
       }
       #player-grid {
         display: grid;
@@ -55,7 +56,7 @@
         <!-- video div element, and player caption (P.CAP.) element for each player
              P.CAP. element: player name, score, high-level game info.
              press-and-hold to see detailed player info               -->
-        <playervideo v-on:addplayers="addplayers($event)" v-on:addpeer="addpeer($event)" v-bind:socket="socket" v-on:myplayeridupdate="myplayerid=$event" v-on:mypeeridupdate="peerid=$event" v-on:removeplayer="removeplayer($event)" v-bind:myplayerid="myplayerid"></playervideo>
+        <playervideo v-bind:peerid="peerid" v-bind:playerinfolocal="playerinfolocal" v-on:addplayers="addplayers($event)" v-on:addstreamid="addstreamid($event)" v-on:addpeer="addpeer($event)" v-bind:socket="socket" v-on:myplayeridupdate="myplayerid=$event" v-on:mypeeridupdate="peerid=$event" v-on:removeplayer="removeplayer($event)" v-bind:myplayerid="myplayerid"></playervideo>
         <playercaption v-bind:gamestate="gamestate" v-bind:playerinfolocal="playerinfolocal" v-bind:socket="socket"></playercaption>
       </div>
 
@@ -83,7 +84,7 @@
             mediaready: false,
             // for player caption
             numPlayers: 1, // gets updated from server
-            playerinfolocal: [{playerName: 'Host', playerScore: 0, playerNumber: 1, peerid: 'Host'}], // gets updated from server
+            playerinfolocal: [{playerName: 'Host', playerScore: 0, playerNumber: 1, peerid: 'Host', streamid: ''}], // gets updated from server
             myplayerid: 'Host',
             peerid: '',
             playernumber: 0, // which player are you
@@ -205,6 +206,12 @@
             console.log('PLAYER NUMBER: ', pids.playernums[0]);
             this.mediaready = true;
           },
+          // adds stream id to player (their video stream)
+          addstreamid(idinfo){
+            pid = idinfo['peerid'];
+            sid = idinfo['streamid'];
+            this.socket.emit('addstreamid', {'peerid': pid, 'streamid': sid});
+          },
           addpeer(peerinfo){
             console.log('ADDING PEER: ', peerinfo);
             this.peers[peerinfo['userid']] = peerinfo['peercall'];
@@ -273,6 +280,22 @@
             }
             this.changestate_revealandupdatescore(stateparams);
           });
+
+          // after a new video stream has connected, get signal from server
+          this.socket.on('updatestreaminfo', mystreaminfo => {
+            console.log('updating stream info!', mystreaminfo);
+            // update local player info -> stream id of each player
+            for(i=0;i<mystreaminfo.playerids.length;i++){
+              for(j=0;j<this.playerinfolocal.length;j++){
+                if(this.playerinfolocal[j]['peerid']===mystreaminfo.playerids[i]){
+                  peertemp = this.playerinfolocal[j]['peerid'];
+                  this.playerinfolocal[j]['streamid']=mystreaminfo.streamids[peertemp];
+                }
+              }
+            }
+            console.log('playerinfolocal...', this.playerinfolocal);
+          });
+
         }
 //        created(){
 //
@@ -295,10 +318,27 @@
           }
         }
       });
+
+      app.component('playercaption',{
+        props: ['gamestate', 'playerinfolocal','socket'],
+        template: `<div id="player-grid"><div v-for="player in playerinfolocal"><span :style="styleobject">{{player.playerName}}  <b>SCORE: {{player.playerScore}}</b></span></div></div>`,
+        data(){
+          return {
+            styleobject: {
+              color: 'black',
+              border: '2px solid black',
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }
+          }
+        },
+      });
+
       app.component('playervideo', {
-        props: ['socket', 'myplayerid'],
-        emits: ['addplayers', 'addpeer', 'myplayeridupdate', 'mypeeridupdate','removeplayer'],
-        template: `<div id="video-grid"></div>`,
+        props: ['socket', 'myplayerid', 'playerinfolocal', 'peerid'],
+        emits: ['addplayers', 'addpeer', 'myplayeridupdate', 'mypeeridupdate','removeplayer','addstreamid'],
+        template: `<div id="video-grid"><div v-for="player in playerinfolocal"><video v-bind:id="player.peerid"></video></div></div>`,
         data(){
           return {
           //  socket: io('/'),
@@ -309,11 +349,16 @@
             myStream: null,
             videoElements: {},
             streamIds: [],
+            videoStreams: {},
+            alreadyStreaming: [],
           }
         },
         methods: {
+          addVideoInfo: function(mystream, myvideo){
+            this.videoElements[mystream['id']] = myvideo;
+            this.videoStreams[mystream['id']] = mystream;
+          },
           connectToNewUser: function(userId, stream){
-
             /// calls new user and sends them our video stream.
             // on their end, peer.call() will get called, and they will answer with stream
             const call = this.myPeer.call(userId, stream);
@@ -326,16 +371,16 @@
 
               // add their video stream to our DOM
               if(Object.keys(this.videoElements).includes(userId) === false){
-                let theirvideo = document.createElement('video');
-                this.videoElements[userId] = theirvideo;
-                this.addVideoStream(theirvideo, userVideoStream);
-	               console.log('added video stream for ', userId);
-               }
+                let theirvideo = document.createElement('video')
+                this.addVideoInfo(userVideoStream, theirvideo);
+//                this.addVideoStream(theirvideo, userVideoStream);
+	              console.log('added video stream for ', userId);
+              }
 
               // when user closes their video, remove their video element.
               call.on('close', () => {
                 console.log('closing video for ', userId);
-                theirvideo.remove();
+                this.videoElements[userVideoStream['id']].remove();
               });
             });
 
@@ -347,14 +392,29 @@
             this.$emit('addpeer', {'userid': userId, 'peercall': call});
             // this.peers[userId] = call;
           },
+          getPlayerName(myid){
+            for(i=0;i<this.playerinfolocal.length;i++){
+              if(this.playerinfolocal[i].peerid===myid){
+                return this.playerinfolocal[i].playerName;
+              }
+            }
+          },
+          getPlayerScore(myid){
+            for(i=0;i<this.playerinfolocal.length;i++){
+              if(this.playerinfolocal[i].peerid===myid){
+                return this.playerinfolocal[i].playerScore;
+              }
+            }
+          },
           appendVideo(myvideo){
             this.videoGrid.append(myvideo);
             console.log('appended video ', myvideo);
           },
           addVideoStream: function(video, stream){
+            console.log('adding video stream ', video, stream);
             // attaches stream to the video HTML element
             video.srcObject = stream;
-            this.appendVideo(video);
+//            this.appendVideo(video);
             // once metadata is loaded, begin playing video/audio stream
             video.addEventListener('loadedmetadata', () => {
   	           console.log('video trying to play now...');
@@ -373,15 +433,18 @@
           addPlayersToGame: function( playerinfo ){
             this.$emit('addplayers', playerinfo);
           },
+          getPeeridByStreamid: function(sid){
+            for(i=0;i<this.playerinfolocal.length;i++){
+              if(this.playerinfolocal[i].streamid===sid){
+                return this.playerinfolocal[i].peerid;
+              }
+            }
+          },
         },
 	      created(){
 
 	      },
         mounted(){
-          // for video
-//          this.socket = io('/');
-//          this.peers = {};
-
           // get access to microphone and camera
           navigator.mediaDevices.getUserMedia({
             video: true,
@@ -393,16 +456,17 @@
               console.log('VIDEO GRID: ', this.videoGrid);
             }
             if(this.myVideo === null){
+//              this.myVideo = document.createElement('video');
               this.myVideo = document.createElement('video');
-              this.videoElements['self'] = this.myVideo;
               this.myVideo.muted = true; // mute ourselves
               console.log('MYVIDEO: ', this.myVideo);
               if(this.myStream === null){
                 this.myStream = stream;
+                this.addVideoInfo(stream, this.myVideo);
               }
               // all video/audio output will go to stream variable.
               // Attach stream to video HTML element, and then display it.
-              this.addVideoStream(this.myVideo, this.myStream);
+//              this.addVideoStream(this.myVideo, this.myStream);
               console.log('video should now be playing for self!');
             }
 
@@ -444,6 +508,8 @@
               // record player id of you
               this.$emit('myplayeridupdate', this.myplayerid);
               this.$emit('mypeeridupdate', id);
+              // tell server stream has been added
+              this.$emit('addstreamid', {'peerid': id, 'streamid': stream['id']});
             });
 
             // once OTHER client calls peer-to-peer, we answer with our video stream.
@@ -457,7 +523,8 @@
                   console.log('adding stream, ', userVideoStream);
                   this.streamIds.push(userVideoStream['id']);
                   const othervideo = document.createElement('video');
-                  this.addVideoStream(othervideo,userVideoStream);
+                  this.addVideoInfo(userVideoStream, othervideo);
+//                  this.addVideoStream(othervideo,userVideoStream);
                 }
               });
             });
@@ -465,27 +532,48 @@
           }).catch( function(error){
             console.log('ERROR: could not create video for self - navigator.mediaDevices.getuserMedia error ', error);
           });
+
+//           this.$watch(()=> [this.gamestate, this.mediaready, this.playernumber], (newVal, oldVal) => {
+
+          this.$watch(()=> [this.playerinfolocal, this.videoStreams], (newVal, oldVal) => {
+            for(i=0;i<this.playerinfolocal.length;i++){
+              // update whenever we get a new stream logged onto local playerinfo
+              if(this.playerinfolocal[i].streamid !== undefined && this.alreadyStreaming.includes(this.playerinfolocal[i].peerid)===false && this.videoElements[this.playerinfolocal[i].streamid] !== undefined && this.videoStreams[this.playerinfolocal[i].streamid] !== undefined && document.getElementById(this.playerinfolocal[i].peerid) !== null){
+                oldvideo = document.getElementById(this.playerinfolocal[i].peerid);
+                newvideo = this.videoElements[this.playerinfolocal[i].streamid]; // gets saved video element
+                newstream = this.videoStreams[this.playerinfolocal[i].streamid]; // and associated stream
+                console.log('peerid: ', this.playerinfolocal[i].peerid);
+                console.log('videoElements: ', this.videoElements);
+                console.log('videoStreams: ', this.videoStreams);
+                console.log('streamid: ', this.playerinfolocal[i].streamid);
+                console.log('old video: ', oldvideo);
+
+                this.addVideoStream(newvideo, newstream); // starts playing video stream
+                oldvideo.parentNode.replaceChild(newvideo, oldvideo);
+                this.alreadyStreaming.push(this.playerinfolocal[i].peerid);
+              }
+            }
+          }, {deep: true} );
+
         }
       });
-      app.component('playercaption',{
-        props: ['gamestate', 'playerinfolocal','socket'],
-        template: `<div id="player-grid"><div v-for="player in playerinfolocal"><span :style="styleobject">{{player.playerName}}  <b>SCORE: {{player.playerScore}}</b></span></div></div>`,
-        data(){
-          return {
-            styleobject: {
-              color: 'black',
-              border: '2px solid black',
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-            }
-          }
-        },
-      });
-//      app.component('gamearea', {
-//        props: [],
-//        template: `<span></span>`,
+
+//      app.component('playercaption',{
+//        props: ['gamestate', 'playerinfolocal','socket'],
+//        template: `<div id="player-grid"><div v-for="player in playerinfolocal"><span :style="styleobject">{{player.playerName}}  <b>SCORE: {{player.playerScore}}</b></span></div></div>`,
+//        data(){
+//          return {
+//            styleobject: {
+//              color: 'black',
+//              border: '2px solid black',
+//              width: '100%',
+//              height: '100%',
+//              objectFit: 'cover',
+//            }
+//          }
+//        },
 //      });
+
       app.component('gameboard', {
         props: ['centercards', 'centercardowners','activeplayer','gamestate'],
         emits: ['centercardselected'],

@@ -27,11 +27,13 @@ let howmanycardschosen = 0;
 let whichcardschosen = [];
 // keep track of chosen center cards
 let howmanycentercardschosen = 0;
-let whohaschosencentercards = [];
+// let whohaschosencentercards = [];
 let whichcentercardschosen = [];
 let peerlist = [];
 let peers = [];
+let streamids = {};
 let current_activeplayer = 0;
+const POINT_SCORE = 3;
 
 function haspeer(cc, which_peer){
   for(i=0;i<cc.length;i++){
@@ -87,6 +89,7 @@ io.on('connection', socket => {
     peerlist.push({'peeruserId': peeruserId, 'peerswhochoseyourcard': [], 'playerId': playerId, 'scorechange': 0});
     peers.push(peeruserId);
     console.log(peerlist);
+    streamids[peeruserId] = null;
     peer2player[peeruserId] = playerId;
     playernames.push(playerId);
     playerscores.push(0);
@@ -101,9 +104,16 @@ io.on('connection', socket => {
       player_removed = playernames.splice(playernames.indexOf(peer2player[peeruserId]), 1);
       playerscores.splice(playernames.indexOf(peer2player[peeruserId]), 1);
       pnum = playernums.splice(playernames.indexOf(peer2player[peeruserId]), 1);
-      available_playernums.push(pnum);
+      avchangestateailable_playernums.push(pnum);
 //      let playerinfo = {'playernames': playernames, 'playerscores': playerscores, 'playernums': playernums, 'status': 'disconnecting'};
       io.in(roomId).emit('remove-player', {'playername': player_removed});
+    });
+
+    // when a new video stream comes in
+    socket.on('addstreamid', (ids) => {
+      streamids[ids['peerid']] = ids['streamid'];
+      let streaminfo = {'playerids': peers, 'streamids':  streamids};
+      io.in(roomId).emit('updatestreaminfo', streaminfo);
     });
 //               this.socket.emit('changestate', 'playerchoosecard', {'playbuttonactive': false, 'infomsg': "Active player chooses card and gives clue. Then other players choose a card."});
     socket.on('changestate', (whatstate, options) => {
@@ -115,7 +125,7 @@ io.on('connection', socket => {
         for(i=0;i<peerlist.length;i++){
           peerlist[i]['peerswhochoseyourcard'] = [];
           peerlist[i]['scorechange'] = 0;
-        };
+        }
       };
     });
     socket.on('cardselected', (peerid3, options) => {
@@ -123,8 +133,20 @@ io.on('connection', socket => {
       if (haspeer(whichcardschosen, peerid3) === false){
         howmanycardschosen += 1;
       }
-      whichcardschosen.push({'peerid': peerid3, 'whichcard': options['whichcard']});
-
+      // and keep track of who already chose (peerid is who chose)
+      let peer_alreadychose = -1;
+      for(i=0;i<whichcardschosen.length;i++){
+        if(peerid3 === whichcardschosen[i]['peerid']){
+          peer_alreadychose = i;
+        }
+      }
+      // if peer already chose a card previously, just update which card they chose.
+      if(peer_alreadychose===-1){
+        whichcardschosen.push({'peerid': peerid3, 'whichcard': options['whichcard']});
+      }
+      else{
+        whichcardschosen[peer_alreadychose]['whichcard'] = options['whichcard'];
+      }
       // once everyone has chosen their card, go to next state - show cards in center
       if(howmanycardschosen >= playernames.length){
         // shuffle array before emitting
@@ -132,18 +154,32 @@ io.on('connection', socket => {
         io.in(roomId).emit('changestate_showcentercards', {'whichcardschosen': whichcardschosen});
       }
     });
-    // called when peer (peerid) selects a card
+    // called when peer (peerid) selects a card - peerid2 => who selecte
     socket.on('centercardselected', (peerid2, options) => {
       console.log('active player: ', peerlist[current_activeplayer]['peeruserId']);
-      peerid = options['peerwhoselected'];
-      if(peerid !== peerlist[current_activeplayer]['peeruserId']){
-        // keep track of how many center cards were chosen
-        if(haspeer(whohaschosencentercards, peerid)===false){
+//      peerid = options['peerwhoselected'];
+      if(peerid2 !== peerlist[current_activeplayer]['peeruserId']){
+        // keep track of how many center cards were chosen, and who has chosen
+        if(haspeer(whichcentercardschosen, peerid2)===false){
           howmanycentercardschosen += 1;
-          whohaschosencentercards.push(peerid);
+          console.log(peerid2, ' just chose a card: ', howmanycentercardschosen, ' cards chosen now.');
+          // whohaschosencentercards.push(peerid2);
         };
         // and keep track of who chose what, and who owns the center cards (peerid is who chose)
-        whichcentercardschosen.push({'peerid': peerid, 'owner': options['whichpeer']['owner'], 'idx': options['whichpeer']['idx']});
+        let peer_alreadychose = -1;
+        for(i=0;i<whichcentercardschosen.length;i++){
+          if(peerid2 === whichcentercardschosen[i]['peerid']){
+            peer_alreadychose = i;
+          }
+        }
+        // if peer already chose a card previously, just update which card they chose.
+        if(peer_alreadychose === -1){
+          whichcentercardschosen.push({'peerid': peerid2, 'owner': options['whichpeer']['owner'], 'idx': options['whichpeer']['idx']});
+        } else {
+          whichcentercardschosen[peer_alreadychose]['owner'] = options['whichpeer']['owner'];
+          whichcentercardschosen[peer_alreadychose]['idx'] = options['whichpeer']['idx'];
+        }
+
         console.log('centercardselected: ', whichcentercardschosen);
         if(howmanycentercardschosen >= playernames.length-1){
           for(j=0;j<whichcentercardschosen.length;j++){
@@ -163,25 +199,25 @@ io.on('connection', socket => {
             peer = peerlist[i]['peeruserId']
             whochose = peerlist[i]['peerswhochoseyourcard'];
             howmanychoseyou = peerlist[i]['peerswhochoseyourcard'].length;
-            // for the active player, he/she gets 3 points if at least one but not all chose him/her.
-            // each of the people who chose the active player gets 3 points.
+            // for the active player, he/she gets (POINT_SCORE) points if at least one but not all chose him/her.
+            // each of the people who chose the active player gets (POINT_SCORE) points.
             if(peer === peerlist[current_activeplayer]['peeruserId']){
               if(howmanychoseyou>0 && howmanychoseyou<playernames.length-1){
-                playerscores[playernames.indexOf(peer2player[peer])] += 3;
-                peerlist[i]['scorechange'] += 3;
+                playerscores[playernames.indexOf(peer2player[peer])] += POINT_SCORE;
+                peerlist[i]['scorechange'] += POINT_SCORE;
               }
               for(j=0;j<whochose.length;j++){
-                playerscores[playernames.indexOf(peer2player[whochose[j]])] += 3;
+                playerscores[playernames.indexOf(peer2player[whochose[j]])] += POINT_SCORE;
                 for(k=0;k<peerlist.length;k++){
                     if(peerlist[k]['peeruserId']===whochose[j]){
-                      peerlist[k]['scorechange'] += 3;
+                      peerlist[k]['scorechange'] += POINT_SCORE;
                     }
                 }
               }
             } else{
-              // other players get 3 points for each player that chosen their card
-              playerscores[playernames.indexOf(peer2player[peer])] += 3*howmanychoseyou;
-              peerlist[i]['scorechange'] += 3*howmanychoseyou;
+              // other players get (POINT_SCORE) points for each player that chosen their card
+              playerscores[playernames.indexOf(peer2player[peer])] += POINT_SCORE*howmanychoseyou;
+              peerlist[i]['scorechange'] += POINT_SCORE*howmanychoseyou;
             }
           }
           console.log('UPDATED SCORES: ',playerscores);
@@ -199,7 +235,7 @@ io.on('connection', socket => {
           howmanycardschosen = 0;
           whichcardschosen = [];
           howmanycentercardschosen = 0;
-          whohaschosencentercards = [];
+          // whohaschosencentercards = [];
           whichcentercardschosen = [];
         }
       };
